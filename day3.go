@@ -12,28 +12,40 @@ import (
 )
 
 func main() {
-	dataType, numberInfoList := readData()
-	numRows := len(numberInfoList)
+	data, numberInfoList := readData()
+	findPartner := func(matrix [][]int, x int, y int) (int, bool) {
+		for _, row := range matrix {
+			if row[1] == x && row[2] == y {
+				return row[0], true
+			}
+		}
+		return 0, false
+	}
 
-	var total int
-	var starInfo []NumberInfo
-	for row := 0; row < numRows; row++ {
-		for _, info := range numberInfoList[row] {
-			isPartNumber, isStar := isPartNumber(row, info.StartIndex, info.EndIndex, dataType)
-			if isPartNumber || isStar {
-				total += info.Number
+	var partI, partII int
+	var starInfo [][]int
+
+	for row, numbers := range numberInfoList {
+		for _, number := range numbers {
+
+			isSymbol, isStar, starPositionX, starPositionY := isPartNumber(row, number[1], number[2], data)
+			if isSymbol || isStar {
+				partI += number[0]
 			}
 
 			if isStar {
-				starInfo = append(starInfo, info)
+				gearPartner, isGear := findPartner(starInfo, starPositionX, starPositionY)
+				if isGear {
+					partII += number[0] * gearPartner
+				}
+				starInfo = append(starInfo, []int{number[0], starPositionX, starPositionY})
 			}
 		}
 	}
-	fmt.Println(len(starInfo))
-	fmt.Println("the sum is ", total)
+	fmt.Println("Part I and part II are ", partI, partII)
 }
 
-func readData() ([][]string, [][]NumberInfo) {
+func readData() ([][]string, [][][]int) {
 	// open file
 	file, err := os.Open("day3.csv")
 	if err != nil {
@@ -46,8 +58,8 @@ func readData() ([][]string, [][]NumberInfo) {
 	// read csv values using csv.Reader
 	csvReader := csv.NewReader(file)
 
-	var dataType [][]string
-	var nrIdx [][]NumberInfo
+	var data [][]string
+	var nrIdx [][][]int
 
 	for {
 		line, err := csvReader.Read()
@@ -63,50 +75,14 @@ func readData() ([][]string, [][]NumberInfo) {
 
 		// Convert the string to a slice of characters
 		char := strings.Split(line[0], "")
-		var rowType []string
-		for _, element := range char {
-			valueType := valueType(element)
-			rowType = append(rowType, valueType)
-		}
-		dataType = append(dataType, rowType)
 
+		data = append(data, char)
 	}
 
-	return dataType, nrIdx
+	return data, nrIdx
 }
 
-func valueType(str string) string {
-	// Convert string to integer
-	_, err := strconv.Atoi(str)
-
-	var dataType string
-	if err == nil {
-		// if no error ocurred
-		dataType = "int"
-	}
-
-	if err != nil {
-		// if error when converting to int
-		if str == "." {
-			dataType = "period"
-		} else if str == "*" {
-			dataType = "star"
-		} else {
-			dataType = "symbol"
-		}
-	}
-
-	return dataType
-}
-
-// NumberInfo represents information about a number in the string
-type NumberInfo struct {
-	Number     int
-	StartIndex int
-	EndIndex   int
-}
-
-func findNumbersAndIndices(input string) []NumberInfo {
+func findNumbersAndIndices(input string) [][]int {
 
 	// Define a regular expression pattern for numbers
 	re := regexp.MustCompile(`\d+`)
@@ -114,73 +90,72 @@ func findNumbersAndIndices(input string) []NumberInfo {
 	// Find all matches and their indices in the input string
 	matchesIndex := re.FindAllStringIndex(input, -1)
 
-	var numberInfoList []NumberInfo
+	var numberInfoList [][]int
 
 	// Extract numbers and their indices
 	for _, matchIndex := range matchesIndex {
 		startIndex, endIndex := matchIndex[0], matchIndex[1]
-		numberStr := input[startIndex:endIndex]
-		number, _ := strconv.Atoi(numberStr) // Convert string to int
-
-		numberInfo := NumberInfo{
-			Number:     number,
-			StartIndex: startIndex,
-			EndIndex:   endIndex,
-		}
-
-		numberInfoList = append(numberInfoList, numberInfo)
+		number, _ := strconv.Atoi(input[startIndex:endIndex]) // Convert string to int
+		numberInfoList = append(numberInfoList, []int{number, startIndex, endIndex})
 	}
 
 	return numberInfoList
 }
 
-func isPartNumber(row int, startIndex int, endIndex int, datatype [][]string) (bool, bool) {
-	numRows, numCols := len(datatype), len(datatype[0])
+func isPartNumber(row int, startIndex int, endIndex int, data [][]string) (bool, bool, int, int) {
+	/*
+		A number could be single digits, double digits or triple digits.
+		This function check if a number is a partnumber by looking at the neighbours of a number
+		given its row number, indices where the numbers starts and where it end in the datatype matrix.
+	*/
 
-	var neighbours []string
 	var left, right int
+	var starPositionX, starPositionY int
+	var isStar, isSymbol bool
 
-	if startIndex == 0 {
-		// if the first column
+	isStarOrSymbol := func(x int, y int) {
+		value := data[x][y]
+		switch {
+		case value == "*":
+			starPositionX = x
+			starPositionY = y
+			isStar = true
+		case strings.Contains("0123456789.", value):
+			//do nothing
+		default:
+			isSymbol = true
+		}
+	}
+
+	switch startIndex {
+	case 0:
+		// if the first column, no left neighbour and 1 right neighbour
 		left = 0
 		right = 1
-		neighbours = append(neighbours, datatype[row][endIndex])
-	} else {
-		left = -1
-		neighbours = append(neighbours, datatype[row][startIndex-1])
+		isStarOrSymbol(row, endIndex)
 
-		if endIndex == numCols {
-			//if last column
-			right = 0
-		} else {
-			//if not first nor last column
-			neighbours = append(neighbours, datatype[row][endIndex])
-			right = 1
-
+	default:
+		left = -1 // if not the first column, include the left neighbour
+		isStarOrSymbol(row, startIndex-1)
+		switch {
+		case endIndex == len(data[0]):
+			right = 0 //if last column, no right neighbour
+		default:
+			isStarOrSymbol(row, endIndex)
+			right = 1 //if not first nor last column, include right neighbour
 		}
 	}
 
-	idx := (endIndex - startIndex) + right
-
-	for i := left; i < idx; i++ {
-		if row == 0 {
-			neighbours = append(neighbours, datatype[row+1][startIndex+i])
-		} else if row+1 == numRows {
-			neighbours = append(neighbours, datatype[row-1][startIndex+i])
-		} else {
-			neighbours = append(neighbours, datatype[row-1][startIndex+i])
-			neighbours = append(neighbours, datatype[row+1][startIndex+i])
+	for i := left; i < (endIndex-startIndex)+right; i++ {
+		switch {
+		case row == 0:
+			isStarOrSymbol(row+1, startIndex+i)
+		case row+1 == len(data):
+			isStarOrSymbol(row-1, startIndex+i)
+		default:
+			isStarOrSymbol(row-1, startIndex+i)
+			isStarOrSymbol(row+1, startIndex+i)
 		}
 	}
-
-	return containsString(neighbours, "symbol"), containsString(neighbours, "star")
-}
-
-func containsString(stringList []string, target string) bool {
-	for _, element := range stringList {
-		if element == target {
-			return true
-		}
-	}
-	return false
+	return isSymbol, isStar, starPositionX, starPositionY
 }
